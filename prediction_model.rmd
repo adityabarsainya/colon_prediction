@@ -1,0 +1,173 @@
+```{r}
+col_data <- read.csv("colon_ds.csv")
+c_name<-c("id","study","treat","sex","age","obstruct","perfor","adhere","nodes","status","differ","extent","surg",	"node4","time","etype")
+#length(c_name)
+colnames(col_data)<-c("X",c_name)
+colon <-data.frame(matrix(ncol=16,nrow=1))
+colon_test<-data.frame(matrix(ncol=16,nrow=1))
+colnames(colon)<-c_name
+colnames(colon_test)<-c_name
+
+#Dividing data for training and testing purposes division is in ratio 80:20
+i=1
+while(i<nrow(col_data)-600)
+{
+  #x<-sample(0:1,1,replace = TRUE)
+  #print(x)
+  n<-col_data[i,2:ncol(col_data)]
+  i=i+1
+  colon<-rbind(colon,n)
+}
+while(i<nrow(col_data))
+{
+  #x<-sample(0:1,1,replace = TRUE)
+  #print(x)
+  n<-col_data[i,2:ncol(col_data)]
+  i=i+1
+  colon_test<-rbind(colon_test,n)
+}
+colon
+colon_test
+
+```
+```{r}
+#Data preprocessing removing all NA values from data frame
+library("plyr")
+colon<-na.omit(colon)
+colon_test<-na.omit(colon_test)
+colon<-transform(colon,treat=as.factor(mapvalues(treat,c("Obs","Lev","Lev+5FU"),c(1,2,3),warn_missing=FALSE)))
+colon_test<-transform(colon_test,treat=as.factor(mapvalues(treat,c("Obs","Lev","Lev+5FU"),c(1,2,3),warn_missing=FALSE)))
+colon
+```
+```{r}
+#Transfroming data to suitable Data type For both testing and training data
+library("caret")
+library("rpart.plot")
+library("rpart")
+
+dim(colon)
+dim(colon_test)
+anyNA(colon)
+anyNA(colon_test)
+
+temp<-colon
+temp<-transform(temp,treat=as.factor(mapvalues(treat,c(1,2,3),c("Obs","Lev","Lev+5FU"),warn_missing=FALSE)))
+temp<-transform(temp,sex=as.factor(mapvalues(sex,c(0,1),c("female","male"),warn_missing=FALSE)))
+temp<-transform(temp,extent=as.factor(mapvalues(extent,c(1,2,3,4),c("submucosa","muscle","serosa","contiguous structures"), warn_missing=FALSE)))
+temp<-transform(temp,differ=as.factor(mapvalues(differ,c(1,2,3),c("well","moderate","poor"),warn_missing=FALSE)))
+temp<-transform(temp,etype=as.factor(mapvalues(etype,c(1,2),c("recurrence","death"),warn_missing=FALSE)))
+temp<-transform(temp,node4=as.factor(mapvalues(node4,c(0,1),c("negative","positive"),warn_missing=FALSE)))
+
+temp1<-colon_test
+temp1<-transform(temp1,treat=as.factor(mapvalues(treat,c(1,2,3),c("Obs","Lev","Lev+5FU"),warn_missing=FALSE)))
+temp1<-transform(temp1,sex=as.factor(mapvalues(sex,c(0,1),c("female","male"),warn_missing=FALSE)))
+temp1<-transform(temp1,extent=as.factor(mapvalues(extent,c(1,2,3,4),c("submucosa","muscle","serosa","contiguous structures"), warn_missing=FALSE)))
+temp1<-transform(temp1,differ=as.factor(mapvalues(differ,c(1,2,3),c("well","moderate","poor"),warn_missing=FALSE)))
+temp1<-transform(temp1,etype=as.factor(mapvalues(etype,c(1,2),c("recurrence","death"),warn_missing=FALSE)))
+temp1<-transform(temp1,node4=as.factor(mapvalues(node4,c(0,1),c("negative","positive"),warn_missing=FALSE)))
+
+
+
+#normalizing data(time) converting the data in days to year 
+normalize<-function(x){(x/365)}
+
+n_temp<-normalize(temp$time)
+temp<-transform(temp,time=n_temp)
+
+n_temp1<-normalize(temp1$time)
+temp1<-transform(temp1,time=n_temp1)
+temp
+temp1
+summary(temp)
+summary(temp1)
+```
+```{r}
+
+#model 1:- using Decision tree  Classifier (Gini Index/Infromation Gain) 
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 2)
+set.seed(3333)
+colon_dtree<- train(etype ~ treat+sex+age+node4+differ+extent+time, data=temp, method = "rpart",parms =list(split = "gini"),trControl=ctrl,tuneLength = 10)
+colon_dtree
+prp(colon_dtree$finalModel, box.palette = "Blues", tweak = 1.2)
+
+#model 2:- using Recursive Partitioning and Regression Trees
+colon_rtree<- rpart(etype ~ treat+sex+age+node4+differ+extent+time,data=temp,method="class") 
+rpart.plot(colon_rtree)
+summary(colon_rtree)
+
+
+#model 3:- LDA
+set.seed(3333)
+colon_ltree<- train(etype ~ treat+sex+age+node4+differ+extent+time, data=temp, method = "lda",trControl=ctrl,tuneLength = 10)
+colon_ltree
+
+#model 4:- kNN
+set.seed(3333)
+colon_ktree<- train(etype ~ treat+sex+age+node4+differ+extent+time, data=temp, method = "knn",trControl=ctrl,tuneLength = 10)
+colon_ktree
+
+
+results <- resamples(list(CART=colon_dtree, LDA=colon_ltree, KNN=colon_ktree))
+summary(results)
+
+
+
+```
+```{r}
+
+pre<-predict(colon_dtree, newdata =temp1)
+confusionMatrix(pre, temp1$etype)
+
+
+
+tab<-table(predict=pre,actual=temp1$etype)
+tab
+
+# density plots of accuracy
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+densityplot(results, scales=scales, pch = "|")
+
+```
+
+
+```{r}
+
+#User Interface for prediction  
+r_id = 2763
+u_df <-temp1[1,]
+
+u_df
+
+user_entry <- function(){
+u_name <- readline(prompt="Enter name: ")
+u_age <- readline(prompt="Enter age: ")
+u_age <- as.integer(u_age)
+u_sex <- readline(prompt="Enter sex(male/female): ")
+u_treat <- readline(prompt="Which treatment? (Lev+5FU,Obs,Lev): ")
+u_obs <- readline(prompt="Enter differentiation as per report(well,moderate or poor): ")
+u_extent <- readline(prompt="Enter extent(submucosa,muscle,serosa,continguous structures): ")
+u_time <- readline(prompt="Enter time since last operation/chemotherapy (in years): ")
+u_time <- as.double(u_time)
+u_node<- readline(prompt="Enter number of nodes affected: ")
+u_node <- as.integer(u_node)
+if(u_node>4)
+{
+  node4="positive"
+}
+else
+{
+  node4="negative"
+}
+user_col <- c(r_id,1,u_treat,u_sex,u_age,0,0,0,u_node,1,u_obs,u_extent,0,node4,u_time,"")
+user_col
+}
+u_col<-user_entry()
+u_df<-rbind(u_df,u_col)
+u_df<-transform(u_df,age = as.integer(age),time=as.double(time))
+
+result<-predict(colon_dtree, newdata = u_df[2,])
+result
+
+
+
+```
